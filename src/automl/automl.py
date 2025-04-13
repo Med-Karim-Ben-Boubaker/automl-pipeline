@@ -42,8 +42,151 @@ class AutoMLRunner:
             self.task_type = 'classification'
             return 'classification'
         
-    def clean_data(self, dataframe: pd.DataFrame) -> pd.DataFrame:
-        return dataframe.dropna()
+    def _impute_categorical_nan(
+        self,
+        series: pd.Series,
+        column_name: str,
+    ) -> pd.Series :
+        
+        """
+        Impute NaN values in a categorical series.
+        """
+        
+        return series
+        
+    def _impute_numerical_nan(
+        self,
+        series: pd.Series,
+        column_name: str,
+        threshold_abs_skewness: float
+        ) -> pd.Series:
+        
+        """
+        Impute NaN values in a numerical series based on skewness.
+        """
+        fun_name = "_impute_numerical_nan"
+        
+        try:
+            
+            skewness = series.dropna().skew()
+            
+            if pd.isna(skewness):
+                print(f"**{fun_name}**:  Skewness: nan (cannot calculate for '{column_name}')")
+                mean_val = series.mean()
+
+                if pd.isna(mean_val):
+                    print(f"**{fun_name}**:  Warning: Cannot compute mean for  '{column_name}'\
+                        (likely all NaNs). Skipping imputation.")
+                    
+                    return series
+                
+                else:
+                    print(f"**{fun_name}**:  Action: Imputing NaNs with Mean ({mean_val:.2f})\
+                        (due to NaN skewness).")
+                    return series.fillna(mean_val)
+                
+            print(f"**{fun_name}**:  Skewness: {skewness:.2f}")
+            
+            if abs(skewness) > threshold_abs_skewness:
+                median_val = series.median()
+                print(f"**{fun_name}**:  Action: Imputing NaNs with Median ({median_val:.2f})\
+                    due to high skewness.")
+                return series.fillna(median_val)
+            
+            else:
+                mean_val = series.mean()
+                print(f"**{fun_name}**:  Action: Imputing NaNs with Mean ({mean_val:.2f})\
+                    due to low skewness.")
+                return series.fillna(mean_val)
+            
+        except Exception as e:
+            print(f"**{fun_name}**:  Warning: Error during numerical imputation for \
+                '{column_name}': {e}. Skipping imputation.")
+            
+            return series
+        
+    def preprocess_data(
+        self,
+        dataframe: pd.DataFrame,
+        task_type: str,
+        threshold_high_missing: float = 0.7,
+        threshold_abs_skewness: float = 1.0,
+    ) -> pd.DataFrame:
+        
+        """
+        Preprocess the DataFrame by handling missing values.
+        """
+        fun_name = "preprocess_data"
+        
+        print(f"\n**{fun_name}**: --- Starting NaN Handling ---")
+        
+        if not isinstance(dataframe, pd.DataFrame):
+            raise TypeError(f"**{fun_name}**: Input 'dataframe' must be a pandas DataFrame.")
+        
+        if dataframe.empty:
+            print(f"**{fun_name}**: Input DataFrame is empty. Returning empty DataFrame.")
+            return dataframe
+        
+        df_processed = dataframe.copy()
+        initial_cols = df_processed.shape[1]
+        cols_to_process = df_processed.columns.tolist()
+        cols_dropped = 0
+        
+        for column in cols_to_process:
+            
+            if column not in df_processed.columns:
+                continue
+            
+            series = df_processed[column]
+            missing_percentage = series.isnull().mean()
+            print(f"**{fun_name}**:  \nProcessing column: '{column}' \
+                (Missing: {missing_percentage:.2%})")
+            
+            # 1. Check for High Missingness
+            if missing_percentage > threshold_high_missing:
+                print(f"**{fun_name}**:  Action: Dropping column '{column}' due to high \
+                    missing \values ({missing_percentage:.2%}).")
+                df_processed.drop(column, axis=1, inplace=True)
+                cols_dropped += 1
+                continue
+            
+            # 2. Skip of No Missing Values 
+            if missing_percentage == 0:
+                print(f"**{fun_name}**:  Action: Skipping column '{column}' (no missing values).")
+                continue
+            
+            # 3. Delegate Imputation based on Type
+            imputed_series = None
+            if pd.api.types.is_numeric_dtype(series):
+                imputed_series = self._impute_numerical_nan(
+                    series,
+                    column,
+                    threshold_abs_skewness
+                    )
+                
+            elif pd.api.types.is_object_dtype(series) or \
+                pd.api.types.is_bool_dtype(series):
+                    imputed_series = self._impute_categorical_nan(
+                        series,
+                        column
+                    )
+                    
+            else:
+                # -- TO-DO --
+                # Handle different datatypes(e.g., datetime )
+                print(f"**{fun_name}**: Action: Skipping column '{column}' \
+                    (unhandled type: {series.dtype}).")
+                
+                continue
+            
+            df_processed[column] = imputed_series
+            
+            final_cols = df_processed.shape[1]
+            print(f"\n**{fun_name}**:  --- NaN Handling Finished ---")
+            print(f"**{fun_name}**:  Columns processed. Initial: {initial_cols}, \
+                Final: {final_cols}. Dropped: {cols_dropped}")
+            
+        return df_processed
     
     def train_model(self, dataframe: pd.DataFrame, target: str, type: str) -> None:
         
