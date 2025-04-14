@@ -46,11 +46,64 @@ class AutoMLRunner:
         self,
         series: pd.Series,
         column_name: str,
+        default_placeholder: str = "Unknown",
+        threshold_high_cardinality: float = 0.8,
+        threshold_low_mode_freq: float = 0.5,
     ) -> pd.Series :
-        
         """
         Impute NaN values in a categorical series.
         """
+        fun_name = "_impute_categorical_nan"
+        
+        try:
+            
+            col_non_missing = series.dropna()
+            n_non_missing = len(col_non_missing)
+            
+            if n_non_missing == 0:
+                print(f"**{fun_name}**:  Warning: All values are NaN in '{column_name}'.\
+                    Filling NaN with {default_placeholder}.")
+                
+                return series.fillna(default_placeholder)
+            
+            n_unique = col_non_missing.nunique()
+            cardinality_ratio = n_unique / n_non_missing
+            print(f"**{fun_name}**:   Unique values (non-NaN): {n_unique}, Cardinality Ratio: \
+                {cardinality_ratio:.2f}")
+            
+            use_placeholder = False
+            reason = ""
+            
+            if cardinality_ratio > threshold_high_cardinality:
+                use_placeholder = True
+                reason = f"High cardinality ratio ({cardinality_ratio:.2f} > \
+                    {threshold_high_cardinality:.2f})"
+            
+            else:
+                modes = col_non_missing.mode()
+                if modes.empty:
+                    use_placeholder = True
+                    reason = f"No mode found (all values unique)"
+                else:
+                    mode_val = modes[0]
+                    mode_freq = (col_non_missing == mode_val).sum() / n_non_missing
+                    print(f"**{fun_name}**:  Mode: '{mode_val}', Mode Frequency: {mode_freq:.2f}")
+                    
+                    if mode_freq < threshold_low_mode_freq:
+                        use_placeholder = True
+                        reason = f"Low mode frequency ({mode_freq:.2f} < {threshold_low_mode_freq:.2f})"
+                        
+            if use_placeholder:
+                print(f"  Reason for placeholder: {reason}")
+                print(f"**{fun_name}**:  Action: Filling NaNs with Placeholder ('{default_placeholder}').")
+                return series.fillna(default_placeholder)
+            else:
+                print(f"**{fun_name}**:  Action: Filling NaNs with Mode ('{mode_val}').")
+                return series.fillna(mode_val)
+            
+        except Exception as e:
+            print(f"**{fun_name}**:  Warning: Error during categorical imputation for \
+                '{column_name}': {e}. Skipping imputation.")
         
         return series
         
@@ -58,7 +111,7 @@ class AutoMLRunner:
         self,
         series: pd.Series,
         column_name: str,
-        threshold_abs_skewness: float
+        threshold_abs_skewness: float,
         ) -> pd.Series:
         
         """

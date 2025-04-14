@@ -67,4 +67,50 @@ def test_numerical_median_imputation():
     assert processed_df['Num_HighSkew'].isnull().sum() == 0
     assert processed_df['Num_HighSkew'].iloc[2] == 2.5
 
+def test_drop_high_missing_categorical():
+    """Verify columns with > threshold_high_missing NaNs are dropped."""
+    df = pd.DataFrame({
+        'A': ['b', 'c', 'a', 'd', 'a', 'b', 'a', 's', 's', 'd'],
+        'B': ['b', np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, 'b'], # 80% missing
+        'C': ['b', 'b', 'b', np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, 'b'] # 60% missing
+    })
+    # Using default threshold_high_missing = 0.7
+    processed_df = preprocessor.preprocess_data(df.copy(), 'classification')
+
+    assert 'A' in processed_df.columns
+    assert 'B' not in processed_df.columns # Should be dropped (80% > 70%)
+    assert 'C' in processed_df.columns     # Should be kept (60% < 70%)
+
+    
+def test_preprocess_cat_mode_imputation():
+    """Test that preprocess_data correctly imputes categorical columns using mode or default value."""
+
+    test_cases = [
+        {
+            "input": pd.DataFrame({'A': ['A', 'B', 'A', np.nan, 'A', 'B', np.nan]}),
+            "expected": pd.DataFrame({'A': ['A', 'B', 'A', 'A', 'A', 'B', 'A']}),
+        },
+        {
+            "input": pd.DataFrame({'B': ['A', 'B', 'C', np.nan, 'D', 'E', np.nan]}),
+            "expected": pd.DataFrame({'B': ['A', 'B', 'C', 'Unknown', 'D', 'E', 'Unknown']}),
+        },
+        {
+            "input": pd.DataFrame({'C': ['A', 'B', 'C', 'D', 'E', 'F', 'A', 'B', 'C', 'D', np.nan, np.nan]}),
+            "expected": pd.DataFrame({'C': ['A', 'B', 'C', 'D', 'E', 'F', 'A', 'B', 'C', 'D', 'Unknown', 'Unknown']}),
+        },
+    ]
+
+    for case in test_cases:
+        input_df = case["input"]
+        expected_df = case["expected"]
+        processed_df = preprocessor.preprocess_data(input_df.copy(), task_type='classification')
+        assert_frame_equal(processed_df, expected_df)
+
+    
+    
+    
+    
+    
+    
+
 
