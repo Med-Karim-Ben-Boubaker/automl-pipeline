@@ -168,7 +168,7 @@ class AutoMLRunner:
         """
         Preprocess the DataFrame by handling missing values.
         """
-        fun_name = "preprocess_data"
+        fun_name = "preprocess_nan_data"
         
         print(f"\n**{fun_name}**: --- Starting NaN Handling ---")
         
@@ -247,9 +247,54 @@ class AutoMLRunner:
         task_type: str,
         threshold_high_missing: float = 0.7,
         threshold_abs_skewness: float = 1.0,
+        # Add cardinality threshold for encoding
+        cardinality_threshold: int = 10 
     ) -> pd.DataFrame:
+        """
+        Full preprocessing pipeline including NaN handling and encoding.
+        """
+        fun_name = "preprocess_data"
+        print(f"**{fun_name}**: --- Starting Full Preprocessing ---")
         
-        return
+        if target not in dataframe.columns:
+             raise ValueError(f"Target column '{target}' not found in DataFrame.")
+         
+        X = dataframe.drop(columns=[target])
+        y = dataframe[target]
+        
+        # 1. Handle NaNs in features
+        X_processed = self.preprocess_nan_data(
+            X,
+            threshold_high_missing=threshold_high_missing,
+            threshold_abs_skewness=threshold_abs_skewness
+        )
+        
+        if X_processed.empty:
+            print(f"**{fun_name}**: Warning: Feature DataFrame is empty after NaN handling. \
+                  Returning the empty dataframe.")
+            # If no features remain, return only the target column as a DataFrame
+            return dataframe
+            
+        
+        # 2. Encode Categorical Features
+        print(f"\n**{fun_name}**: --- Starting Categorical Encoding ---")
+        cols_to_encode = X_processed.select_dtypes(include=['object', 'category']).columns.tolist()
+        print(f"**{fun_name}**: Found categorical columns: {cols_to_encode}")
+        
+        for col in cols_to_encode:
+            if col in X_processed.columns: # Check if column still exists after NaN handling
+                 X_processed = self._encode_categorical_features(
+                     X_processed,
+                     col,
+                     cardinality_threshold=cardinality_threshold
+                 )
+                 
+        print(f"\n**{fun_name}**: --- Categorical Encoding Finished ---")
+        
+        final_df = pd.concat([X_processed, y], axis=1)
+        
+        print(f"\n**{fun_name}**: --- Full Preprocessing Finished ---")
+        return final_df
         
     def _encode_categorical_features(
         self,
