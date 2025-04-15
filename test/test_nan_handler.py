@@ -25,7 +25,7 @@ def test_drop_high_missing():
         'C': [1, 2, 3, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, 10] # 60% missing
     })
     # Using default threshold_high_missing = 0.7
-    processed_df = preprocessor.preprocess_data(df.copy(), 'classification')
+    processed_df = preprocessor.preprocess_nan_data(df.copy())
 
     assert 'A' in processed_df.columns
     assert 'B' not in processed_df.columns # Should be dropped (80% > 70%)
@@ -37,7 +37,7 @@ def test_no_missing():
         'A': [1, 2, 3],
         'B': [3, 2, 1]    
     })
-    processed_df = preprocessor.preprocess_data(df.copy(), 'classification')
+    processed_df = preprocessor.preprocess_nan_data(df.copy())
     
     assert 'A' in processed_df.columns
     assert 'B' in processed_df.columns
@@ -49,7 +49,7 @@ def test_numerical_mean_imputation():
     df = pd.DataFrame({
         'Num_LowSkew': [10, 11, np.nan, 12, 10.5]
         })
-    processed_df = preprocessor.preprocess_data(df.copy(), task_type='regression')
+    processed_df = preprocessor.preprocess_nan_data(df.copy())
 
     assert processed_df['Num_LowSkew'].isnull().sum() == 0
     assert processed_df['Num_LowSkew'].iloc[2] == pytest.approx(10.875)
@@ -62,7 +62,7 @@ def test_numerical_median_imputation():
         'Num_HighSkew': [1, 2, np.nan, 100, 3]
         })
     
-    processed_df = preprocessor.preprocess_data(df.copy(), task_type='regression', threshold_abs_skewness=1.0)
+    processed_df = preprocessor.preprocess_nan_data(df.copy(), threshold_abs_skewness=1.0)
 
     assert processed_df['Num_HighSkew'].isnull().sum() == 0
     assert processed_df['Num_HighSkew'].iloc[2] == 2.5
@@ -75,7 +75,7 @@ def test_drop_high_missing_categorical():
         'C': ['b', 'b', 'b', np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, 'b'] # 60% missing
     })
     # Using default threshold_high_missing = 0.7
-    processed_df = preprocessor.preprocess_data(df.copy(), 'classification')
+    processed_df = preprocessor.preprocess_nan_data(df.copy())
 
     assert 'A' in processed_df.columns
     assert 'B' not in processed_df.columns # Should be dropped (80% > 70%)
@@ -103,7 +103,7 @@ def test_preprocess_cat_mode_imputation():
     for case in test_cases:
         input_df = case["input"]
         expected_df = case["expected"]
-        processed_df = preprocessor.preprocess_data(input_df.copy(), task_type='classification')
+        processed_df = preprocessor.preprocess_nan_data(input_df.copy(), task_type='classification')
         assert_frame_equal(processed_df, expected_df)
 
     

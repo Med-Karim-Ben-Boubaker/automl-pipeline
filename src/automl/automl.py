@@ -158,10 +158,9 @@ class AutoMLRunner:
             
             return series
         
-    def preprocess_data(
+    def preprocess_nan_data(
         self,
         dataframe: pd.DataFrame,
-        task_type: str,
         threshold_high_missing: float = 0.7,
         threshold_abs_skewness: float = 1.0,
     ) -> pd.DataFrame:
@@ -240,6 +239,71 @@ class AutoMLRunner:
                 Final: {final_cols}. Dropped: {cols_dropped}")
             
         return df_processed
+    
+    def preprocess_data(
+        self,
+        dataframe: pd.DataFrame,
+        target: str,
+        task_type: str,
+        threshold_high_missing: float = 0.7,
+        threshold_abs_skewness: float = 1.0,
+    ) -> pd.DataFrame:
+        
+        return
+        
+    def _encode_categorical_features(
+        self,
+        dataframe: pd.DataFrame,
+        column_name: str,
+        cardinality_threshold: int = 10
+        ) -> pd.DataFrame:
+        """
+        Encodes a single categorical column in the DataFrame.
+
+        Chooses between One-Hot Encoding (for low cardinality) and
+        Frequency Encoding (for high cardinality).
+        """
+        fun_name = "_encode_categorical_features"
+        print(f"\n**{fun_name}**: Encoding column: '{column_name}'")
+        
+        if column_name not in dataframe.columns:
+            print(f"**{fun_name}**: Warning: Column '{column_name}' not found. Skipping.")
+            return dataframe
+        
+        series = dataframe[column_name]
+        
+        # Ensure the column is treated as categorical/object
+        if not pd.api.types.is_object_dtype(series):
+             print(f"**{fun_name}**: Warning: Column '{column_name}' is not object/category dtype \
+                 ({series.dtype}). Skipping encoding.")
+             return dataframe
+         
+         # Calculate cardinality (number of unique values)
+        n_unique = series.nunique()
+        print(f"**{fun_name}**:   Unique values: {n_unique}")
+        
+        try:
+            if n_unique <= 1:
+                print(f"**{fun_name}**: Action: Skipping encoding for '{column_name}' (single or no unique value).")
+                dataframe = dataframe.drop(column_name, axis=1)
+                print(f"**{fun_name}**: Dropped column '{column_name}' due to single unique value.")
+                
+            elif n_unique <= cardinality_threshold:
+                print(f"**{fun_name}**: Action: Applying One-Hot Encoding to '{column_name}' (low cardinality).")
+                dummies = pd.get_dummies(series, prefix=column_name, dummy_na=False) 
+                dataframe = pd.concat([dataframe.drop(column_name, axis=1), dummies], axis=1)
+                
+            else:
+                print(f"**{fun_name}**: Action: Applying Frequency Encoding to '{column_name}' (high cardinality).")
+                frequency_map = series.map(series.value_counts(normalize=True))
+                dataframe[column_name + '_freq'] = frequency_map
+                dataframe = dataframe.drop(column_name, axis=1) 
+        
+        except Exception as e:
+            print(f"**{fun_name}**: Error encoding column '{column_name}': {e}. Skipping.")
+            
+        return dataframe
+
     
     def train_model(self, dataframe: pd.DataFrame, target: str, type: str) -> None:
         
