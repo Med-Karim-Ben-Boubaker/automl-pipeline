@@ -27,20 +27,49 @@ class AutoMLRunner:
             print(f"An unexpected error occurred: {e}")
             return None
         
-    def get_task_type(self, dataframe: pd.DataFrame, target: str) -> str:
-        target_series = dataframe[target]
-        
-        if pd.api.types.is_numeric_dtype(target_series):
-            if target_series.nunique() <= 10:
-                self.task_type = 'classification'
-                return 'classification'
+    def get_task_type(self, dataframe: pd.DataFrame, target: str) -> str | None:
+        """
+        Determines the task type (classification or regression) based on the target column's dtype and unique values.
+        - Object/Category/Bool -> Classification
+        - Integer with few unique values -> Classification
+        - Integer with many unique values -> Regression
+        - Float -> Regression
+        """
+        if target not in dataframe.columns:
+            print(f"**get_task_type**: Error: Target column '{target}' not found.")
+            return None
+
+        target_series = dataframe[target].dropna()
+
+        if target_series.empty:
+             print(f"**get_task_type**: Warning: Target column '{target}' has no valid data after dropping NaNs.")
+             return None
+
+        dtype = target_series.dtype
+        n_unique = target_series.nunique()
+        unique_value_threshold = 20
+
+        if pd.api.types.is_object_dtype(dtype) or \
+           isinstance(dtype, pd.CategoricalDtype) or \
+           pd.api.types.is_bool_dtype(dtype):
+            task = 'classification'
+        elif pd.api.types.is_integer_dtype(dtype):
+            if n_unique <= unique_value_threshold:
+                task = 'classification'
             else:
-                self.task_type = 'regression'
-                return 'regression'
-        
+                task = 'regression'
+        elif pd.api.types.is_float_dtype(dtype):
+             if n_unique <= 2:
+                 print(f"**get_task_type**: Warning: Float target '{target}' has <= 2 unique values. Interpreting as classification.")
+                 task = 'classification'
+             else:
+                 task = 'regression'
         else:
-            self.task_type = 'classification'
-            return 'classification'
+            print(f"**get_task_type**: Warning: Unhandled dtype '{dtype}' for target '{target}'. Defaulting to classification.")
+            task = 'classification'
+
+        self.task_type = task
+        return task
         
     def _impute_categorical_nan(
         self,
@@ -247,52 +276,65 @@ class AutoMLRunner:
         task_type: str,
         threshold_high_missing: float = 0.7,
         threshold_abs_skewness: float = 1.0,
-        # Add cardinality threshold for encoding
-        cardinality_threshold: int = 10 
-    ) -> pd.DataFrame:
+        cardinality_threshold: int = 10
+    ) -> pd.DataFrame | None:
         """
         Full preprocessing pipeline including NaN handling and encoding.
+        Returns a DataFrame with processed features and the original target column,
+        or None if all feature columns are dropped during preprocessing.
         """
         fun_name = "preprocess_data"
         print(f"**{fun_name}**: --- Starting Full Preprocessing ---")
-        
+
         if target not in dataframe.columns:
-             raise ValueError(f"Target column '{target}' not found in DataFrame.")
-         
+             raise ValueError(f"**{fun_name}**: Target column '{target}' not found in DataFrame.")
+
+        # Handle case where only target column exists initially
+        if dataframe.shape[1] <= 1 and target in dataframe.columns:
+            print(f"**{fun_name}**: DataFrame contains only the target column. No features to preprocess.")
+            return None # Return None as there are no features
+
         X = dataframe.drop(columns=[target])
         y = dataframe[target]
-        
+
         # 1. Handle NaNs in features
         X_processed = self.preprocess_nan_data(
             X,
             threshold_high_missing=threshold_high_missing,
             threshold_abs_skewness=threshold_abs_skewness
         )
-        
+
         if X_processed.empty:
-            print(f"**{fun_name}**: Warning: Feature DataFrame is empty after NaN handling. \
-                  Returning the empty dataframe.")
-            # If no features remain, return only the target column as a DataFrame
-            return dataframe
-            
-        
+            print(f"**{fun_name}**: Warning: Feature DataFrame is empty after NaN handling.")
+            return None # Return None if no features remain
+
         # 2. Encode Categorical Features
         print(f"\n**{fun_name}**: --- Starting Categorical Encoding ---")
         cols_to_encode = X_processed.select_dtypes(include=['object', 'category']).columns.tolist()
-        print(f"**{fun_name}**: Found categorical columns: {cols_to_encode}")
-        
+        print(f"**{fun_name}**: Found categorical columns in processed features: {cols_to_encode}")
+
+        temp_X_processed = X_processed.copy()
         for col in cols_to_encode:
-            if col in X_processed.columns: # Check if column still exists after NaN handling
-                 X_processed = self._encode_categorical_features(
-                     X_processed,
+            if col in temp_X_processed.columns: # Check if column still exists
+                 temp_X_processed = self._encode_categorical_features(
+                     temp_X_processed,
                      col,
                      cardinality_threshold=cardinality_threshold
                  )
-                 
+                 if temp_X_processed.empty: # Check if encoding removed everything
+                      break
+
+        X_processed = temp_X_processed # Assign result back
+
         print(f"\n**{fun_name}**: --- Categorical Encoding Finished ---")
-        
+
+        if X_processed.empty:
+             print(f"**{fun_name}**: Warning: Feature DataFrame is empty after encoding.")
+             return None # Return None if no features remain
+
+        # Concatenate only if features exist
         final_df = pd.concat([X_processed, y], axis=1)
-        
+
         print(f"\n**{fun_name}**: --- Full Preprocessing Finished ---")
         return final_df
         
@@ -350,75 +392,192 @@ class AutoMLRunner:
         return dataframe
 
     
-    def train_model(self, dataframe: pd.DataFrame, target: str, type: str) -> None:
-        
-        dataframe = dataframe.dropna()
+    def run_baseline_pipeline(self, dataframe: pd.DataFrame, target: str) -> object | None:
+        """
+        Runs a baseline modeling pipeline: preprocess, split, train default model, evaluate.
+        """
+        fun_name = "run_baseline_pipeline"
+        print(f"\n**{fun_name}**: --- Starting Baseline Pipeline ---")
+        self.model = None # Reset model state at the start of a run
 
-        print("Choosing the best model for classification...")
-        
-        if type == 'classification':
+        # 1. Prepare data (Preprocess, Splitting)
+        prepared_data = self._prepare_data_for_modeling(dataframe, target)
+        if prepared_data is None:
+            print(f"**{fun_name}**: Halting pipeline due to data preparation issues.")
+            # self.model is already None from the start
+            return None
 
-            chosen_model = 'LogisticRegression'
-        elif type == 'regression':
+        X_train, X_test, y_train, y_test, task_type = prepared_data
 
-            chosen_model = 'LinearRegression'
+        # 2. Select and Train Model
+        model = self._select_and_train_default_model(X_train, y_train, task_type)
+        if model is None:
+            print(f"**{fun_name}**: Halting pipeline due to model training failure.")
+             # self.model is already None from the start
+            return None
+
+        # Assign model ONLY if training succeeded
+        self.model = model
+
+        # 3. Evaluate Model
+        self._evaluate_model(self.model, X_test, y_test, task_type)
+
+        print(f"**{fun_name}**: --- Baseline Pipeline Finished ---")
+        return self.model
+    
+    def _prepare_data_for_modeling(
+            self, dataframe: pd.DataFrame, target: str
+            ) -> tuple | None:
+        """
+        Prepares data for modeling: determines task, preprocesses, splits.
+        Returns (X_train, X_test, y_train, y_test, task_type) or None if errors occur.
+        """
+        fun_name = "_prepare_data_for_modeling"
+        print(f"\n**{fun_name}**: --- Preparing Data ---")
+
+        # 1a. Determine Task Type
+        task_type = self.get_task_type(dataframe, target)
+        if task_type is None:
+             print(f"**{fun_name}**: Error: Could not determine task type for target '{target}'.")
+             return None
+        print(f"**{fun_name}**: Determined task type: {task_type}")
+
+
+        # 1b. Preprocess Data
+        processed_df = self.preprocess_data(dataframe, target, task_type)
+
+        if processed_df is None:
+            print(f"**{fun_name}**: Preprocessing resulted in no features or failed. Halting data preparation.")
+            return None # Stop preparation immediately if no features
+
+        # --- If we reach here, processed_df is a valid DataFrame with features + target ---
+
+        # Check target integrity after potential NaN dropping during preprocessing (if it happened)
+        if target not in processed_df.columns:
+            print(f"**{fun_name}**: Internal Error: Target missing after successful preprocessing. Cannot proceed.")
+            return None # Should be unlikely now
+
+        # Drop rows with NaN in target (now safe as processed_df is valid)
+        processed_df = processed_df.dropna(subset=[target])
+        if processed_df.empty:
+            print(f"**{fun_name}**: Warning: DataFrame is empty after dropping NaNs in target. Cannot proceed.")
+            return None
+
+        # 1c. Separate Features (X) and Target (y)
+        # Since processed_df is not None and has target, X will have >= 0 features
+        y = processed_df[target]
+        X = processed_df.drop(target, axis=1)
+
+        # Double check X shape (should be redundant now but safe)
+        if X.shape[1] == 0:
+             print(f"**{fun_name}**: Internal Warning: No features found after separation, though preprocessing returned a DataFrame.")
+             return None
+
+        # 1e. Split Data
+        print(f"**{fun_name}**: Splitting data into training and testing sets...")
+        try:
+            split_data = self._split_data(X, y, task_type)
+            if split_data is None:
+                return None # Error already printed in _split_data
+
+            X_train, X_test, y_train, y_test = split_data
+            print(f"**{fun_name}**: Data preparation and split complete.")
+            return X_train, X_test, y_train, y_test, task_type
+
+        except Exception as e:
+             print(f"**{fun_name}**: Unexpected error during data preparation's split phase: {e}")
+             return None
         
-        print(f"Model chosen: {chosen_model}")
-        
-        print("Initializing model...")
-        
-        # Seperate features (X) and target (y)
-        y = dataframe[target]
-        X = dataframe.drop(target, axis=1)
-        
-        # Select only numerical columns
-        numerical_cols = X.select_dtypes(include=['number']).columns
-        X_numerical = X[numerical_cols]
-        
-        X_train, X_test, y_train, y_test = train_test_split(
-            X_numerical, y, test_size=0.2, random_state=42
-            )
-        
-        print ("Training model...")
-        if chosen_model == 'LogisticRegression':
+    def _split_data(self, X: pd.DataFrame, y: pd.Series, task_type: str) -> tuple | None:
+        """Splits data into train/test sets with stratification for classification."""
+        fun_name = "_split_data"
+        try:
+            # Use stratification for classification if possible
+            # Note: stratificaiton is a special sampling technique
+            stratify_param = y if task_type == 'classification' and y.nunique() > 1 else None
+            X_train, X_test, y_train, y_test = train_test_split(
+                 X, y, test_size=0.2, random_state=42, stratify=stratify_param
+             )
             
-            model = LogisticRegression(max_iter=1000)
-            model.fit(X_train, y_train)
-            
-            self.model = model
-            
-        elif chosen_model == 'LinearRegression':
+            print(f"**{fun_name}**: Data split complete. Train shape: {X_train.shape}, Test shape:\
+                {X_test.shape}")
+            return X_train, X_test, y_train, y_test
+        
+        except ValueError as e:
+             print(f"**{fun_name}**: Warning during train/test split (possibly due to insufficient samples\
+                 for stratification): {e}. Trying without stratification.")
+             try:
+                 X_train, X_test, y_train, y_test = train_test_split(
+                     X, y, test_size=0.2, random_state=42
+                 )
+                 print(f"**{fun_name}**: Data split complete (without stratification). Train shape:\
+                     {X_train.shape}, Test shape: {X_test.shape}")
+                 return X_train, X_test, y_train, y_test
+             except Exception as split_err:
+                 print(f"**{fun_name}**: Error during train/test split even without stratification:\
+                     {split_err}. Cannot proceed.")
+                 return None
+        except Exception as general_err:
+             print(f"**{fun_name}**: Unexpected error during data split: {general_err}")
+             return None
+         
+    def _select_and_train_default_model(self, X_train: pd.DataFrame, y_train: pd.Series, task_type: str) -> object | None:
+        """Selects and trains a default model based on the task type."""
+        fun_name = "_select_and_train_default_model"
+        print(f"\n**{fun_name}**: --- Selecting and Training Model ---")
 
+        # Select Model based on Task Type
+        print(f"**{fun_name}**: Choosing the best default model for {task_type}...")
+        if task_type == 'classification':
+            chosen_model_name = 'LogisticRegression'
+            model = LogisticRegression(max_iter=1000, random_state=42)
+        elif task_type == 'regression':
+            chosen_model_name = 'LinearRegression'
             model = LinearRegression()
-            model.fit(X_train, y_train)
-            
-            self.model = model
-            
-        print("Model trained successfully.")
-            
-        # Make predictions on the test set
-        y_pred = model.predict(X_test)
+        else:
+            print(f"**{fun_name}**: Error: Unsupported task type '{task_type}'.")
+            return None
 
+        print(f"**{fun_name}**: Model selected: {chosen_model_name}")
+
+        # Train Model
+        print (f"**{fun_name}**: Training {chosen_model_name} model...")
+        try:
+            model.fit(X_train, y_train)
+            print(f"**{fun_name}**: Model trained successfully.")
+            return model
+        except Exception as e:
+            print(f"**{fun_name}**: Error during model training: {e}")
+            return None
         
-        if type == 'classification':
-            # Evaluate the model
-            accuracy = accuracy_score(y_test, y_pred)
-            report = classification_report(y_test, y_pred)
+    def _evaluate_model(self, model: object, X_test: pd.DataFrame, y_test: pd.Series, task_type: str) -> None:
+        """Evaluates the trained model on the test set."""
+        fun_name = "_evaluate_model"
+        print(f"\n**{fun_name}**: --- Evaluating Model ---")
+        print(f"**{fun_name}**: Evaluating model on the test set...")
+        
+        try:
+            y_pred = model.predict(X_test)
+
+            if task_type == 'classification':
+                accuracy = accuracy_score(y_test, y_pred)
+                report = classification_report(y_test, y_pred, zero_division=0)
+                print(f"**{fun_name}**: Evaluation Results (Classification):")
+                print(f"  Model Accuracy: {accuracy:.4f}")
+                print(f"  Classification Report:\n{report}")
+
+            elif task_type == 'regression':
+                mse = mean_squared_error(y_test, y_pred)
+                r2 = r2_score(y_test, y_pred)
+                print(f"**{fun_name}**: Evaluation Results (Regression):")
+                print(f"  Mean Squared Error: {mse:.4f}")
+                print(f"  R-squared: {r2:.4f}")
+                
+        except Exception as e:
+             print(f"**{fun_name}**: Error during model evaluation: {e}")
             
-            print(f"Model accuracy: {accuracy}")
-            print(f"Classification report:\n{report}")
-            
-        elif type == 'regression':
-            # Evaluate the model
-            mse = mean_squared_error(y_test, y_pred)
-            r2 = r2_score(y_test, y_pred)
-            
-            print(f"Mean Squared Error: {mse}")
-            print(f"R-squared: {r2}")
         
         
-        return model
-                 
                 
                 
                 

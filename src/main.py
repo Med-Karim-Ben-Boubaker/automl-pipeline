@@ -25,7 +25,6 @@ def main():
     )
     print("Data preprocessing finished.")
 
-
     if preprocessed_df is not None and not preprocessed_df.empty:
 
         output_file_path = '/home/karim/automl-pipeline/data/cleaned_titanic.csv'
@@ -37,7 +36,6 @@ def main():
             print("Preprocessing returned None.")
         elif preprocessed_df.empty:
             print("Preprocessing returned an empty DataFrame.")
-
 
 if __name__ == "__main__":
     main()
