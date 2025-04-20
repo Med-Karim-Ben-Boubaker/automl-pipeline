@@ -3,6 +3,7 @@ import shutil
 import uuid
 import logging
 import sys
+import joblib
 from pathlib import Path
 from typing import Dict, Any
 
@@ -59,21 +60,26 @@ def run_automl_processing(
         # 2. Run Baseline Pipeline
         print(f"[{job_id}] Starting baseline pipeline for target '{target_variable}'...")
         
-        # Placeholder implementation until AutoMLRunner is modified:
-        print(f"[{job_id}] Simulating model training...")
-        import time
-        time.sleep(5) # Simulate work
-        metrics = {"accuracy": 0.90, "precision": 0.88} # Dummy metrics
-        # Simulate saving files
-        log_file_path.write_text(f"[{job_id}] Processing started.\nData loaded.\nPipeline run.\nMetrics: {metrics}\nProcessing finished.")
-        model_file_path.write_text("This is a placeholder model file.")
-        print(f"[{job_id}] Pipeline finished.")
-        # --- End Placeholder ---
+        model, metrics = runner.run_baseline_pipeline(
+            dataframe=df,
+            target=target_variable
+        )
         
+        if model is None:
+             # run_baseline_pipeline likely printed an error
+             raise RuntimeError("AutoML pipeline execution failed or returned no model.")
+         
         if metrics is None:
-            raise RuntimeError("AutoML pipeline execution failed.")
+            print("AutoML pipeline completed but evaluation metrics were not returned.")
+            metrics = {"warning": "Evaluation metrics missing or failed."}
+         
+        print("Pipeline finished successfully. Saving model...")
         
-        # 3. Update status - Success
+        # 3. Save the returned model
+        joblib.dump(model, model_file_path)
+        print(f"Model saved to {model_file_path}")
+        
+        # 4. Update status - Success
         job_status["status"] = "completed"
         job_status["message"] = "AutoML processing completed successfully."
         job_status["results"] = {

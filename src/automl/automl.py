@@ -392,7 +392,7 @@ class AutoMLRunner:
         return dataframe
 
     
-    def run_baseline_pipeline(self, dataframe: pd.DataFrame, target: str) -> object | None:
+    def run_baseline_pipeline(self, dataframe: pd.DataFrame, target: str) -> tuple[object | None, dict | None]:
         """
         Runs a baseline modeling pipeline: preprocess, split, train default model, evaluate.
         """
@@ -420,10 +420,10 @@ class AutoMLRunner:
         self.model = model
 
         # 3. Evaluate Model
-        self._evaluate_model(self.model, X_test, y_test, task_type)
+        evaluation_metrics = self._evaluate_model(self.model, X_test, y_test, task_type)
 
         print(f"**{fun_name}**: --- Baseline Pipeline Finished ---")
-        return self.model
+        return self.model, evaluation_metrics
     
     def _prepare_data_for_modeling(
             self, dataframe: pd.DataFrame, target: str
@@ -555,26 +555,41 @@ class AutoMLRunner:
         fun_name = "_evaluate_model"
         print(f"\n**{fun_name}**: --- Evaluating Model ---")
         print(f"**{fun_name}**: Evaluating model on the test set...")
+        results = {"task_type": task_type} # Initialize results dict
         
         try:
             y_pred = model.predict(X_test)
 
             if task_type == 'classification':
                 accuracy = accuracy_score(y_test, y_pred)
-                report = classification_report(y_test, y_pred, zero_division=0)
+
+                report_dict = classification_report(y_test, y_pred, zero_division=0, output_dict=True)
+                report_str = classification_report(y_test, y_pred, zero_division=0, output_dict=False) 
+                
+                results["accuracy"] = accuracy
+                results["classification_report_dict"] = report_dict
+                results["classification_report_string"] = report_str 
+                
                 print(f"**{fun_name}**: Evaluation Results (Classification):")
                 print(f"  Model Accuracy: {accuracy:.4f}")
-                print(f"  Classification Report:\n{report}")
+                print(f"  Classification Report:\n{report_str}")
 
             elif task_type == 'regression':
                 mse = mean_squared_error(y_test, y_pred)
                 r2 = r2_score(y_test, y_pred)
+                results["mean_squared_error"] = mse
+                results["r2_score"] = r2
+
                 print(f"**{fun_name}**: Evaluation Results (Regression):")
                 print(f"  Mean Squared Error: {mse:.4f}")
                 print(f"  R-squared: {r2:.4f}")
                 
+            return results
+                
         except Exception as e:
              print(f"**{fun_name}**: Error during model evaluation: {e}")
+             results["error"] = f"Evaluation failed: {str(e)}"
+             return results
             
         
         
