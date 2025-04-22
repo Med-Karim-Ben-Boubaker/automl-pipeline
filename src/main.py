@@ -9,10 +9,13 @@ from typing import Dict, Any
 
 from fastapi import FastAPI, File, UploadFile, Form, BackgroundTasks, HTTPException, status
 from fastapi.responses import JSONResponse, FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from src.automl.automl import AutoMLRunner
+
+
 
 # --- Configuration ---
 BASE_DIR = Path(__file__).resolve().parent.parent # Project root
@@ -21,6 +24,21 @@ TEMP_RUNS_DIR.mkdir(exist_ok=True) # Create directory if it doesn't exist
 
 # --- FastAPI App ---
 app = FastAPI(title="AutoML API")
+
+# --- CORS Configuration ---
+origins = [
+    "http://localhost",
+    "http://localhost:3000", 
+    "http://localhost:5173", 
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,           # Allows specified origins
+    allow_credentials=True,        # Allows cookies/authorization headers
+    allow_methods=["*"],           # Allows all methods (GET, POST, etc.)
+    allow_headers=["*"],           # Allows all headers
+)
 
 # In-memory Job Status Store
 job_status: Dict[str, Any] = {
